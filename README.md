@@ -35,3 +35,4 @@ This repository contains the prototype implementation for FairWool AI, a wool gr
     ```bash
     streamlit run app.py
     ```
+# Data-inc
