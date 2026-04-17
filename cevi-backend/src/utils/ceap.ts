@@ -27,7 +27,15 @@ export interface CeapResult {
 }
 
 export function calculateCEAP(input: CeapInput): CeapResult {
-  const signs: string[] = input.clinical_signs ? JSON.parse(input.clinical_signs) : [];
+  let signs: string[] = [];
+  if (input.clinical_signs) {
+    try {
+      const parsed = JSON.parse(input.clinical_signs);
+      signs = Array.isArray(parsed) ? parsed : [String(parsed)];
+    } catch {
+      signs = [input.clinical_signs]; // treat plain string as a single sign
+    }
+  }
 
   // ── C class: highest present sign wins ──
   let ceap_c = "C0";

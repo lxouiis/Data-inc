@@ -12,6 +12,7 @@ export interface Patient {
   age: number;
   gender: Gender;
   createdAt: string;
+  ceapGrade?: string;
   // Extended demographics
   height?: number;
   weight?: number;
@@ -19,6 +20,8 @@ export interface Patient {
   ethnicity?: string;
   smokingStatus?: string[];
   occupationType?: string[];
+  comorbidities?: string[];
+  venousHistory?: string[];
   parity?: number;
   currentMedications?: string[];
 }
@@ -63,6 +66,27 @@ export interface LegExam {
   ceapTotal: string;
   rvcssTotal: number;
 }
+
+
+const mapPatientFromBackend = (p: any): Patient => ({
+  id: p.id,
+  patientName: p.name,
+  uhid: p.uhid,
+  age: p.age,
+  gender: p.sex,
+  createdAt: p.created_at,
+  ceapGrade: p.ceap_full,
+  height: p.height,
+  weight: p.weight,
+  bmi: p.bmi?.toString(),
+  ethnicity: p.race,
+  smokingStatus: p.smoking ? (typeof p.smoking === 'string' ? JSON.parse(p.smoking) : p.smoking) : undefined,
+  occupationType: p.occupation ? (typeof p.occupation === 'string' ? JSON.parse(p.occupation) : p.occupation) : undefined,
+  parity: p.parity,
+  comorbidities: p.comorbidities ? (typeof p.comorbidities === 'string' ? JSON.parse(p.comorbidities) : p.comorbidities) : undefined,
+  venousHistory: p.venous_history ? (typeof p.venous_history === 'string' ? JSON.parse(p.venous_history) : p.venous_history) : undefined,
+  currentMedications: p.medications ? (typeof p.medications === 'string' ? JSON.parse(p.medications) : p.medications) : undefined,
+});
 
 const initialLegState: LegExam = {
   skin: 'Normal',
@@ -184,22 +208,7 @@ export const useStore = create<CeviState>()(
         try {
           const res = await api.get('/patients');
           // Map backend fields (name, sex, created_at) to frontend fields (patientName, gender, createdAt)
-          const mapped = res.data.map((p: any) => ({
-            id: p.id,
-            patientName: p.name,
-            uhid: p.uhid,
-            age: p.age,
-            gender: p.sex,
-            createdAt: p.created_at,
-            height: p.height,
-            weight: p.weight,
-            bmi: p.bmi?.toString(),
-            ethnicity: p.race,
-            smokingStatus: p.smoking ? (typeof p.smoking === 'string' ? JSON.parse(p.smoking) : p.smoking) : undefined,
-            occupationType: p.occupation ? (typeof p.occupation === 'string' ? JSON.parse(p.occupation) : p.occupation) : undefined,
-            parity: p.parity,
-            currentMedications: p.medications ? (typeof p.medications === 'string' ? JSON.parse(p.medications) : p.medications) : undefined,
-          }));
+          const mapped = res.data.map(mapPatientFromBackend);
           set({ patients: mapped });
         } catch (error) {
           console.error('Fetch patients failed:', error);
@@ -216,22 +225,18 @@ export const useStore = create<CeviState>()(
             sex: patient.gender,
             height: patient.height,
             weight: patient.weight,
+            bmi: patient.bmi,
             race: patient.ethnicity,
             smoking: patient.smokingStatus ? JSON.stringify(patient.smokingStatus) : undefined,
             occupation: patient.occupationType ? JSON.stringify(patient.occupationType) : undefined,
             parity: patient.parity,
+            comorbidities: patient.comorbidities ? JSON.stringify(patient.comorbidities) : undefined,
+            venous_history: patient.venousHistory ? JSON.stringify(patient.venousHistory) : undefined,
             medications: patient.currentMedications ? JSON.stringify(patient.currentMedications) : undefined,
           };
           const res = await api.post('/patients', payload);
           // Map response back to frontend format
-          const mapped = {
-            id: res.data.id,
-            patientName: res.data.name,
-            uhid: res.data.uhid,
-            age: res.data.age,
-            gender: res.data.sex,
-            createdAt: res.data.created_at,
-          };
+          const mapped = mapPatientFromBackend(res.data);
           set((state) => ({ patients: [mapped as Patient, ...state.patients] }));
           return res.data.id;
         } catch (error: any) {
@@ -243,9 +248,7 @@ export const useStore = create<CeviState>()(
       updatePatient: async (id, data) => {
         try {
           const res = await api.put(`/patients/${id}`, data);
-          set((state) => ({
-            patients: state.patients.map((p) => p.id === id ? res.data : p)
-          }));
+          set((state) => ({ patients: state.patients.map((p) => p.id === id ? mapPatientFromBackend(res.data) : p) }));
         } catch (error) {
           console.error('Update patient failed:', error);
         }
@@ -285,45 +288,89 @@ export const useStore = create<CeviState>()(
               veinesNotes: ba.veines_notes || '',
               rightLeg: rightLeg ? {
                 ...rightLeg,
+                // Doppler — camelCase remaps
+                deepSystem: rightLeg.deep_system || 'Patent',
                 gsvDiamMm: rightLeg.gsv_diameter,
                 ssvDiamMm: rightLeg.ssv_diameter,
+                gsvReflux: rightLeg.gsv_reflux || false,
+                ssvReflux: rightLeg.ssv_reflux || false,
                 incompetentPerforators: rightLeg.incompetent_perforators,
                 commonFemoralVein: rightLeg.common_femoral_vein,
                 superficialFemoralVein: rightLeg.superficial_femoral_vein,
                 poplitealVeinStatus: rightLeg.popliteal_vein,
                 sfjReflux: rightLeg.sfj_reflux,
-                clinicalSigns: JSON.parse(rightLeg.clinical_signs || '[]'),
+                clinicalSigns: (() => { try { return JSON.parse(rightLeg.clinical_signs || '[]'); } catch { return []; } })(),
+                etiology: rightLeg.etiology || '',
+                // rVCSS — name differs between DB and LegExam
+                pain: rightLeg.pain || 0,
+                varicoseVeins: rightLeg.varicose_veins || 0,
+                venousEdema: rightLeg.edema || 0,
+                skinPigmentation: rightLeg.pigmentation || 0,
+                inflammation: rightLeg.inflammation || 0,
+                induration: rightLeg.induration || 0,
+                ulcerNumber: rightLeg.ulcer_count || 0,
+                ulcerDuration: rightLeg.ulcer_duration || 0,
+                ulcerSizeScore: rightLeg.ulcer_size || 0,
+                compressionCompliance: rightLeg.compression || 0,
+                // CEAP + totals
                 ceapTotal: rightLeg.ceap_full,
                 rvcssTotal: rightLeg.rvcss_total,
+                // Ulcer details
                 ulcerPresent: rightLeg.ulcer_present,
                 ulcerLocationText: rightLeg.ulcer_location,
                 ulcerSizeCm: rightLeg.ulcer_size_cm,
                 ulcerType: rightLeg.ulcer_type,
                 ulcerEdges: rightLeg.ulcer_edges,
                 ulcerBase: rightLeg.ulcer_base,
+                // Skin & swelling
                 skin: rightLeg.skin_changes,
                 swelling: rightLeg.swelling_grade ? parseInt(rightLeg.swelling_grade) : 0,
+                // Not stored in DB — provide defaults
+                tenderness: false,
+                varicosities: [],
               } : initialLegState,
               leftLeg: leftLeg ? {
                 ...leftLeg,
+                // Doppler — camelCase remaps
+                deepSystem: leftLeg.deep_system || 'Patent',
                 gsvDiamMm: leftLeg.gsv_diameter,
                 ssvDiamMm: leftLeg.ssv_diameter,
+                gsvReflux: leftLeg.gsv_reflux || false,
+                ssvReflux: leftLeg.ssv_reflux || false,
                 incompetentPerforators: leftLeg.incompetent_perforators,
                 commonFemoralVein: leftLeg.common_femoral_vein,
                 superficialFemoralVein: leftLeg.superficial_femoral_vein,
                 poplitealVeinStatus: leftLeg.popliteal_vein,
                 sfjReflux: leftLeg.sfj_reflux,
-                clinicalSigns: JSON.parse(leftLeg.clinical_signs || '[]'),
+                clinicalSigns: (() => { try { return JSON.parse(leftLeg.clinical_signs || '[]'); } catch { return []; } })(),
+                etiology: leftLeg.etiology || '',
+                // rVCSS — name differs between DB and LegExam
+                pain: leftLeg.pain || 0,
+                varicoseVeins: leftLeg.varicose_veins || 0,
+                venousEdema: leftLeg.edema || 0,
+                skinPigmentation: leftLeg.pigmentation || 0,
+                inflammation: leftLeg.inflammation || 0,
+                induration: leftLeg.induration || 0,
+                ulcerNumber: leftLeg.ulcer_count || 0,
+                ulcerDuration: leftLeg.ulcer_duration || 0,
+                ulcerSizeScore: leftLeg.ulcer_size || 0,
+                compressionCompliance: leftLeg.compression || 0,
+                // CEAP + totals
                 ceapTotal: leftLeg.ceap_full,
                 rvcssTotal: leftLeg.rvcss_total,
+                // Ulcer details
                 ulcerPresent: leftLeg.ulcer_present,
                 ulcerLocationText: leftLeg.ulcer_location,
                 ulcerSizeCm: leftLeg.ulcer_size_cm,
                 ulcerType: leftLeg.ulcer_type,
                 ulcerEdges: leftLeg.ulcer_edges,
                 ulcerBase: leftLeg.ulcer_base,
+                // Skin & swelling
                 skin: leftLeg.skin_changes,
                 swelling: leftLeg.swelling_grade ? parseInt(leftLeg.swelling_grade) : 0,
+                // Not stored in DB — provide defaults
+                tenderness: false,
+                varicosities: [],
               } : initialLegState,
               globalRvcssTotal: ba.global_rvcss,
               createdAt: ba.assessment_date,

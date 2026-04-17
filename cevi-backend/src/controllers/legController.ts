@@ -1,9 +1,19 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { calculateCEAP } from '../utils/ceap';
 import { calculateRvcss } from '../utils/rvcss';
 
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
+
+const toBool = (v: any) => v === true || v === 'true';
+
+const safeParse = (val: any) => {
+  if (!val) return [];
+  try {
+    return typeof val === 'string' ? JSON.parse(val) : val;
+  } catch(e) {
+    return [val];
+  }
+};
 
 /** POST /api/legs — Upsert leg assessment by patient_id + leg_side */
 export async function upsertLeg(req: Request, res: Response): Promise<void> {
@@ -45,12 +55,12 @@ export async function upsertLeg(req: Request, res: Response): Promise<void> {
     const ceap = calculateCEAP({
       clinical_signs: signsStr,
       common_femoral_vein, superficial_femoral_vein, popliteal_vein,
-      sfj_reflux: sfj_reflux === true,
+      sfj_reflux: toBool(sfj_reflux),
       gsv_diameter: gsv_diameter ? parseFloat(gsv_diameter) : null,
-      gsv_reflux: gsv_reflux === true,
+      gsv_reflux: toBool(gsv_reflux),
       ssv_diameter: ssv_diameter ? parseFloat(ssv_diameter) : null,
-      ssv_reflux: ssv_reflux === true,
-      incompetent_perforators: incompetent_perforators === true,
+      ssv_reflux: toBool(ssv_reflux),
+      incompetent_perforators: toBool(incompetent_perforators),
       deep_system,
       etiology,
     });
@@ -74,12 +84,12 @@ export async function upsertLeg(req: Request, res: Response): Promise<void> {
       common_femoral_vein: common_femoral_vein || null,
       superficial_femoral_vein: superficial_femoral_vein || null,
       popliteal_vein: popliteal_vein || null,
-      sfj_reflux: sfj_reflux === true,
+      sfj_reflux: toBool(sfj_reflux),
       gsv_diameter: gsv_diameter ? parseFloat(gsv_diameter) : null,
-      gsv_reflux: gsv_reflux === true,
+      gsv_reflux: toBool(gsv_reflux),
       ssv_diameter: ssv_diameter ? parseFloat(ssv_diameter) : null,
-      ssv_reflux: ssv_reflux === true,
-      incompetent_perforators: incompetent_perforators === true,
+      ssv_reflux: toBool(ssv_reflux),
+      incompetent_perforators: toBool(incompetent_perforators),
       clinical_signs: signsStr,
       etiology: etiology || null,
       ...ceap,
@@ -94,7 +104,7 @@ export async function upsertLeg(req: Request, res: Response): Promise<void> {
       ulcer_size: parseInt(ulcer_size) || 0,
       compression: parseInt(compression) || 0,
       rvcss_total,
-      ulcer_present: ulcer_present === true,
+      ulcer_present: toBool(ulcer_present),
       ulcer_location: ulcer_location || null,
       ulcer_size_cm: ulcer_size_cm ? parseFloat(ulcer_size_cm) : null,
       ulcer_type: ulcer_type || null,
@@ -105,19 +115,31 @@ export async function upsertLeg(req: Request, res: Response): Promise<void> {
       pain_vas: pain_vas != null ? parseInt(pain_vas) : null,
     };
 
-    // Since @@unique([patient_id, leg_side]) was removed, just create.
-    const leg = await prisma.leg.create({
-      data: { patient_id, leg_side, ...data },
-      include: {
-        images: true,
-        doppler: true,
-      },
+    // Since @@unique([patient_id, leg_side]) was removed to allow history,
+    // we fulfill the 'upsert' rule without breaking history by acting on the MOST RECENT leg visit.
+    const latestLeg = await prisma.leg.findFirst({
+      where: { patient_id, leg_side },
+      orderBy: { created_at: 'desc' }
     });
+
+    let leg;
+    if (latestLeg) {
+      leg = await prisma.leg.update({
+        where: { id: latestLeg.id },
+        data,
+        include: { images: true, doppler: true },
+      });
+    } else {
+      leg = await prisma.leg.create({
+        data: { patient_id, leg_side, ...data },
+        include: { images: true, doppler: true },
+      });
+    }
 
     res.status(200).json(leg);
   } catch (error) {
     console.error('Upsert leg error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Database error', detail: (error as Error).message });
   }
 }
 
@@ -141,9 +163,13 @@ export async function getLegs(req: Request, res: Response): Promise<void> {
       orderBy: { leg_side: 'asc' },
     });
 
-    res.json(legs);
+    const mapped = legs.map(l => ({
+      ...l,
+      clinical_signs: safeParse(l.clinical_signs),
+    }));
+    res.json(mapped);
   } catch (error) {
     console.error('Get legs error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Database error', detail: (error as Error).message });
   }
 }

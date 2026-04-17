@@ -1,8 +1,18 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { logAudit } from '../utils/audit';
 
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
+
+
+const safeParse = (val: any) => {
+  if (!val) return [];
+  try {
+    return typeof val === 'string' ? JSON.parse(val) : val;
+  } catch(e) {
+    return [val];
+  }
+};
+
 
 /** GET /api/patients — List all patients with latest CEAP + rVCSS per leg */
 export async function listPatients(req: Request, res: Response): Promise<void> {
@@ -22,17 +32,28 @@ export async function listPatients(req: Request, res: Response): Promise<void> {
       orderBy: { created_at: 'desc' },
     });
 
-    res.json(patients);
+    const mapped = patients.map(p => {
+      const latestLeg = p.legs && p.legs.length > 0 ? p.legs[0] : null;
+      return {
+        ...p,
+        ceap_full: latestLeg?.ceap_full || null,
+        rvcss_total: latestLeg?.rvcss_total || 0,
+        comorbidities: safeParse(p.comorbidities),
+        medications: safeParse(p.medications),
+        venous_history: safeParse(p.venous_history),
+      };
+    });
+    res.json(mapped);
   } catch (error) {
     console.error('List patients error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Database error', detail: (error as Error).message });
   }
 }
 
 /** POST /api/patients — Create new patient with UHID uniqueness check */
 export async function createPatient(req: Request, res: Response): Promise<void> {
   try {
-    const { name, uhid, age, sex, height, weight, race, smoking, occupation, parity,
+    const { name, uhid, age, sex, height, weight, bmi, race, smoking, occupation, parity,
       comorbidities, medications, venous_history, dvt_history, clinic, doctor_notes } = req.body;
 
     if (!name || !uhid || !age || !sex) {
@@ -40,16 +61,17 @@ export async function createPatient(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const patientId = req.params.patientId as string;
     const existing = await prisma.patient.findUnique({ where: { uhid } });
     if (existing) {
       res.status(409).json({ error: 'A patient with this UHID already exists' });
       return;
     }
 
-    const h = parseFloat(height) || 0;
-    const w = parseFloat(weight) || 0;
-    const bmi = h > 0 ? parseFloat((w / ((h / 100) ** 2)).toFixed(1)) : 0;
+    const h = (height !== undefined && height !== null && height !== '') ? parseFloat(height) : null;
+    const w = (weight !== undefined && weight !== null && weight !== '') ? parseFloat(weight) : null;
+    const parsedBmi = bmi !== undefined && bmi !== null && bmi !== ''
+      ? parseFloat(bmi) || null
+      : (h && w && h > 0 ? parseFloat((w / ((h / 100) ** 2)).toFixed(1)) : null);
 
     const patient = await prisma.patient.create({
       data: {
@@ -59,7 +81,7 @@ export async function createPatient(req: Request, res: Response): Promise<void> 
         sex,
         height: h,
         weight: w,
-        bmi,
+        bmi: parsedBmi,
         race: race || null,
         smoking: smoking || null,
         occupation: occupation || null,
@@ -84,7 +106,7 @@ export async function createPatient(req: Request, res: Response): Promise<void> 
     res.status(201).json(patient);
   } catch (error) {
     console.error('Create patient error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Database error', detail: (error as Error).message });
   }
 }
 
@@ -115,10 +137,16 @@ export async function getPatient(req: Request, res: Response): Promise<void> {
       patientId: patient.id
     });
 
-    res.json(patient);
+    const mapped = {
+      ...patient,
+      comorbidities: safeParse(patient.comorbidities),
+      medications: safeParse(patient.medications),
+      venous_history: safeParse(patient.venous_history),
+    };
+    res.json(mapped);
   } catch (error) {
     console.error('Get patient error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Database error', detail: (error as Error).message });
   }
 }
 
@@ -131,12 +159,14 @@ export async function updatePatient(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const { name, age, sex, height, weight, race, smoking, occupation, parity,
+    const { name, age, sex, height, weight, bmi, race, smoking, occupation, parity,
       comorbidities, medications, venous_history, dvt_history, clinic, doctor_notes } = req.body;
 
-    const h = height !== undefined ? parseFloat(height) : existing.height;
-    const w = weight !== undefined ? parseFloat(weight) : existing.weight;
-    const bmi = h > 0 ? parseFloat((w / ((h / 100) ** 2)).toFixed(1)) : existing.bmi;
+    const h = height !== undefined ? (height !== null && height !== '' ? parseFloat(height) : null) : existing.height;
+    const w = weight !== undefined ? (weight !== null && weight !== '' ? parseFloat(weight) : null) : existing.weight;
+    const parsedBmi = bmi !== undefined && bmi !== null && bmi !== ''
+      ? parseFloat(bmi) || null
+      : (h && w && h > 0 ? parseFloat((w / ((h / 100) ** 2)).toFixed(1)) : existing.bmi);
 
     const patient = await prisma.patient.update({
       where: { id: req.params.id as string },
@@ -146,7 +176,7 @@ export async function updatePatient(req: Request, res: Response): Promise<void> 
         ...(sex && { sex }),
         height: h,
         weight: w,
-        bmi,
+        bmi: parsedBmi,
         ...(race !== undefined && { race }),
         ...(smoking !== undefined && { smoking }),
         ...(occupation !== undefined && { occupation }),
@@ -170,6 +200,6 @@ export async function updatePatient(req: Request, res: Response): Promise<void> 
     res.json(patient);
   } catch (error) {
     console.error('Update patient error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Database error', detail: (error as Error).message });
   }
 }

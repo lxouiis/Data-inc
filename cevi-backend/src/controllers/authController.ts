@@ -1,9 +1,8 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 export async function login(req: Request, res: Response): Promise<void> {
   try {
@@ -42,6 +41,6 @@ export async function login(req: Request, res: Response): Promise<void> {
     });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Database error', detail: (error as Error).message });
   }
 }

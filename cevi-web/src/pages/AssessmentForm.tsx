@@ -187,6 +187,8 @@ export function AssessmentForm() {
           occupationType: occupation.length ? occupation : undefined,
           parity: parity ? parseInt(parity) : undefined,
           currentMedications: medications.length ? medications : undefined,
+          comorbidities: comorbidities.length ? comorbidities : undefined,
+          venousHistory: venousHistory.length ? venousHistory : undefined,
         });
         
         if (!newId) throw new Error("Failed to register patient (no ID returned).");

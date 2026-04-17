@@ -22,9 +22,9 @@ model Patient {
   uhid           String   @unique
   age            Int
   sex            String
-  height         Float
-  weight         Float
-  bmi            Float
+  height         Float?
+  weight         Float?
+  bmi            Float?
   race           String?
   smoking        String?
   occupation     String?

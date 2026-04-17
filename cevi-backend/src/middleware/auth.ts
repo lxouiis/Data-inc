@@ -19,7 +19,7 @@ declare global {
 export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'Missing or invalid authorization header' });
+    res.status(401).json({ error: 'Unauthorized' });
     return;
   }
 
@@ -29,6 +29,6 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
     req.user = decoded;
     next();
   } catch {
-    res.status(401).json({ error: 'Invalid or expired token' });
+    res.status(401).json({ error: 'Unauthorized' });
   }
 }

@@ -1,80 +1,95 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { calculateCEAP } from '../utils/ceap';
 import { calculateRvcss } from '../utils/rvcss';
 import { logAudit } from '../utils/audit';
 
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
-// Helper to calculate score and normalize fields for Leg creation
+// Helper to calculate score and normalize fields for Leg creation.
+// Accepts both camelCase (frontend) and snake_case field names.
+const toBool = (v: any) => v === true || v === 'true';
+
 const buildLegData = (leg: any, legSide: 'right' | 'left', patientId: string) => {
-  const signsStr = leg.clinical_signs
-    ? typeof leg.clinical_signs === 'string' ? leg.clinical_signs : JSON.stringify(leg.clinical_signs)
+  // Resolve camelCase (frontend LegExam) → snake_case with snake_case fallback
+  const rawSigns = leg.clinicalSigns ?? leg.clinical_signs;
+  const signsStr = rawSigns != null
+    ? (Array.isArray(rawSigns) ? JSON.stringify(rawSigns) : String(rawSigns))
     : null;
+
+  const deepSystem            = leg.deepSystem            || leg.deep_system              || null;
+  const commonFemoralVein     = leg.commonFemoralVein     || leg.common_femoral_vein      || null;
+  const superficialFemoralVein= leg.superficialFemoralVein|| leg.superficial_femoral_vein || null;
+  const poplitealVein         = leg.poplitealVeinStatus   || leg.popliteal_vein           || null;
+  const sfjReflux             = toBool(leg.sfjReflux      ?? leg.sfj_reflux);
+  const gsvDiameter           = leg.gsvDiamMm             ?? leg.gsv_diameter;
+  const gsvReflux             = toBool(leg.gsvReflux      ?? leg.gsv_reflux);
+  const ssvDiameter           = leg.ssvDiamMm             ?? leg.ssv_diameter;
+  const ssvReflux             = toBool(leg.ssvReflux      ?? leg.ssv_reflux);
+  const incompetentPerforators= toBool(leg.incompetentPerforators ?? leg.incompetent_perforators);
+
+  const pain         = parseInt(leg.pain)                                    || 0;
+  const varicoseVeins= parseInt(leg.varicoseVeins    ?? leg.varicose_veins)  || 0;
+  const edema        = parseInt(leg.venousEdema      ?? leg.edema)           || 0;
+  const pigmentation = parseInt(leg.skinPigmentation ?? leg.pigmentation)    || 0;
+  const inflammation = parseInt(leg.inflammation)                            || 0;
+  const induration   = parseInt(leg.induration)                              || 0;
+  const ulcerCount   = parseInt(leg.ulcerNumber      ?? leg.ulcer_count)     || 0;
+  const ulcerDuration= parseInt(leg.ulcerDuration    ?? leg.ulcer_duration)  || 0;
+  const ulcerSize    = parseInt(leg.ulcerSizeScore   ?? leg.ulcer_size)      || 0;
+  const compression  = parseInt(leg.compressionCompliance ?? leg.compression)|| 0;
 
   const ceap = calculateCEAP({
     clinical_signs: signsStr,
-    common_femoral_vein: leg.common_femoral_vein,
-    superficial_femoral_vein: leg.superficial_femoral_vein,
-    popliteal_vein: leg.popliteal_vein,
-    sfj_reflux: leg.sfj_reflux === true,
-    gsv_diameter: leg.gsv_diameter ? parseFloat(leg.gsv_diameter) : null,
-    gsv_reflux: leg.gsv_reflux === true,
-    ssv_diameter: leg.ssv_diameter ? parseFloat(leg.ssv_diameter) : null,
-    ssv_reflux: leg.ssv_reflux === true,
-    incompetent_perforators: leg.incompetent_perforators === true,
-    deep_system: leg.deep_system,
-    etiology: leg.etiology,
+    common_femoral_vein: commonFemoralVein,
+    superficial_femoral_vein: superficialFemoralVein,
+    popliteal_vein: poplitealVein,
+    sfj_reflux: sfjReflux,
+    gsv_diameter: gsvDiameter ? parseFloat(gsvDiameter) : null,
+    gsv_reflux: gsvReflux,
+    ssv_diameter: ssvDiameter ? parseFloat(ssvDiameter) : null,
+    ssv_reflux: ssvReflux,
+    incompetent_perforators: incompetentPerforators,
+    deep_system: deepSystem,
+    etiology: leg.etiology || null,
   });
 
   const rvcss_total = calculateRvcss({
-    pain: parseInt(leg.pain) || 0,
-    varicose_veins: parseInt(leg.varicose_veins) || 0,
-    edema: parseInt(leg.edema) || 0,
-    pigmentation: parseInt(leg.pigmentation) || 0,
-    inflammation: parseInt(leg.inflammation) || 0,
-    induration: parseInt(leg.induration) || 0,
-    ulcer_count: parseInt(leg.ulcer_count) || 0,
-    ulcer_duration: parseInt(leg.ulcer_duration) || 0,
-    ulcer_size: parseInt(leg.ulcer_size) || 0,
-    compression: parseInt(leg.compression) || 0,
+    pain, varicose_veins: varicoseVeins, edema, pigmentation,
+    inflammation, induration, ulcer_count: ulcerCount,
+    ulcer_duration: ulcerDuration, ulcer_size: ulcerSize, compression,
   });
+
+  const ulcerSizeCmRaw = leg.ulcerSizeCm ?? leg.ulcer_size_cm;
 
   return {
     patient_id: patientId,
     leg_side: legSide,
-    deep_system: leg.deep_system || null,
-    common_femoral_vein: leg.common_femoral_vein || null,
-    superficial_femoral_vein: leg.superficial_femoral_vein || null,
-    popliteal_vein: leg.popliteal_vein || null,
-    sfj_reflux: leg.sfj_reflux === true,
-    gsv_diameter: leg.gsv_diameter ? parseFloat(leg.gsv_diameter) : null,
-    gsv_reflux: leg.gsv_reflux === true,
-    ssv_diameter: leg.ssv_diameter ? parseFloat(leg.ssv_diameter) : null,
-    ssv_reflux: leg.ssv_reflux === true,
-    incompetent_perforators: leg.incompetent_perforators === true,
+    deep_system: deepSystem,
+    common_femoral_vein: commonFemoralVein,
+    superficial_femoral_vein: superficialFemoralVein,
+    popliteal_vein: poplitealVein,
+    sfj_reflux: sfjReflux,
+    gsv_diameter: gsvDiameter ? parseFloat(gsvDiameter) : null,
+    gsv_reflux: gsvReflux,
+    ssv_diameter: ssvDiameter ? parseFloat(ssvDiameter) : null,
+    ssv_reflux: ssvReflux,
+    incompetent_perforators: incompetentPerforators,
     clinical_signs: signsStr,
     etiology: leg.etiology || null,
     ...ceap,
-    pain: parseInt(leg.pain) || 0,
-    varicose_veins: parseInt(leg.varicose_veins) || 0,
-    edema: parseInt(leg.edema) || 0,
-    pigmentation: parseInt(leg.pigmentation) || 0,
-    inflammation: parseInt(leg.inflammation) || 0,
-    induration: parseInt(leg.induration) || 0,
-    ulcer_count: parseInt(leg.ulcer_count) || 0,
-    ulcer_duration: parseInt(leg.ulcer_duration) || 0,
-    ulcer_size: parseInt(leg.ulcer_size) || 0,
-    compression: parseInt(leg.compression) || 0,
+    pain, varicose_veins: varicoseVeins, edema, pigmentation,
+    inflammation, induration,
+    ulcer_count: ulcerCount, ulcer_duration: ulcerDuration,
+    ulcer_size: ulcerSize, compression,
     rvcss_total,
-    ulcer_present: leg.ulcer_present === true,
-    ulcer_location: leg.ulcer_location || null,
-    ulcer_size_cm: leg.ulcer_size_cm ? parseFloat(leg.ulcer_size_cm) : null,
-    ulcer_type: leg.ulcer_type || null,
-    ulcer_edges: leg.ulcer_edges || null,
-    ulcer_base: leg.ulcer_base || null,
-    skin_changes: leg.skin_changes || null,
-    swelling_grade: leg.swelling_grade || null,
+    ulcer_present: toBool(leg.ulcerPresent ?? leg.ulcer_present),
+    ulcer_location: leg.ulcerLocationText || leg.ulcer_location || null,
+    ulcer_size_cm: ulcerSizeCmRaw ? parseFloat(ulcerSizeCmRaw) : null,
+    ulcer_type: leg.ulcerType  || leg.ulcer_type  || null,
+    ulcer_edges: leg.ulcerEdges|| leg.ulcer_edges || null,
+    ulcer_base: leg.ulcerBase  || leg.ulcer_base  || null,
+    skin_changes: leg.skin     || leg.skin_changes || null,
+    swelling_grade: leg.swelling != null ? String(leg.swelling) : (leg.swelling_grade || null),
     pain_vas: leg.pain_vas != null ? parseInt(leg.pain_vas) : null,
   };
 };
@@ -133,7 +148,7 @@ export async function createAssessment(req: Request, res: Response): Promise<voi
     res.status(201).json(assessment);
   } catch (error) {
     console.error('Create assessment error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Database error', detail: (error as Error).message });
   }
 }
 
@@ -153,6 +168,6 @@ export async function getAssessments(req: Request, res: Response): Promise<void>
     res.json(assessments);
   } catch (error) {
     console.error('Get assessments error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Database error', detail: (error as Error).message });
   }
 }

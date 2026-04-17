@@ -1,10 +1,9 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 // ── Image upload config ──
 const imageStorage = multer.diskStorage({
@@ -105,7 +104,7 @@ export async function uploadImage(req: Request, res: Response): Promise<void> {
     res.status(201).json(image);
   } catch (error) {
     console.error('Upload image error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Database error', detail: (error as Error).message });
   }
 }
 
@@ -143,6 +142,6 @@ export async function uploadDoppler(req: Request, res: Response): Promise<void> 
     res.status(201).json(doppler);
   } catch (error) {
     console.error('Upload doppler error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Database error', detail: (error as Error).message });
   }
 }

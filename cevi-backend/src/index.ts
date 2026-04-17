@@ -22,21 +22,41 @@ const PORT = process.env.PORT || 3001;
 app.use(helmet({
   crossOriginResourcePolicy: false, // Allow local images to be loaded
 }));
+
+// CORS Configuration (Requirement 21)
 app.use(cors({
-  origin: 'http://localhost:5173', // React dev server
+  origin: ['http://localhost:5173', 'http://cevi-hospital-prod-ip.local'], // Vite dev server and hypothetical production IP
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 }));
+
+// Ensure OPTIONS preflight returns 200 (Requirement 22)
+app.options('*', cors());
+
 app.use(express.json());
 
-
-
-// Health check
-app.get('/api/health', (req: Request, res: Response) => {
-  res.json({ status: 'ok' });
+// Require Content-Type header on all responses (Requirement 23)
+app.use((req: Request, res: Response, next: express.NextFunction) => {
+  res.setHeader('Content-Type', 'application/json');
+  next();
 });
 
-// Routes
+// Health check (Requirement 33)
+app.get('/api/health', (req: Request, res: Response) => {
+  res.status(200).json({ status: 'ok', project: 'CEVI', timestamp: new Date() });
+});
+
+// Auth Route
 app.use('/api/auth', authRoutes);
+
+// Apply JWT globally to all routes following this except /api/auth/login and /api/health (Requirement 2)
+import { authMiddleware } from './middleware/auth';
+app.use('/api', authMiddleware);
+
+app.use('/storage', authMiddleware, express.static(path.join(process.cwd(), 'storage')));
+
+// Routes
 app.use('/api/patients', patientRoutes);
 app.use('/api/assessments', assessmentRoutes);
 app.use('/api/legs', legRoutes);
@@ -44,10 +64,19 @@ app.use('/api/images', imageRoutes);
 app.use('/api/doppler', dopplerRoutes);
 app.use('/api/files', fileRoutes);
 
-// Error handler
+// 404 Catch-All Handler (Requirement 31)
+app.use('*', (req: Request, res: Response) => {
+  res.status(404).json({ error: 'Route not found' });
+});
+
+// Global Error handler (Requirement 30)
 app.use((err: any, req: Request, res: Response, next: express.NextFunction) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Something broke!' });
+  if (err.name === 'MulterError' && err.code === 'LIMIT_FILE_SIZE') {
+    res.status(400).json({ error: 'File size limit exceeded' });
+    return;
+  }
+  console.error('Unhandled Exception:', err.stack);
+  res.status(500).json({ error: err.message || 'Internal server error' });
 });
 
 app.listen(PORT, () => {
