@@ -1,6 +1,4 @@
-# FairWool AI Hackathon Prototype
 
-This repository contains the prototype implementation for FairWool AI, a wool grading and price suggestion system.
 
 ## Project Structure
 
