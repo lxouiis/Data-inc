@@ -64,6 +64,8 @@ model Leg {
   assessment_id String?
   assessment    Assessment? @relation(fields: [assessment_id], references: [id], onDelete: Cascade)
   leg_side      String
+  visit_number  Int         @default(1)
+  visited_at    DateTime    @default(now())
 
   // Deep System Doppler
   deep_system              String?

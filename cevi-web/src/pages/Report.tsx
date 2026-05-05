@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useStore, type LegExam } from "@/store/useStore";
 import { Button } from "@/components/ui/button";
@@ -97,10 +97,12 @@ export function AssessmentReportPage() {
     const [year, month, day] = dateString.split("-");
     return `${day}/${month}/${year}`;
   };
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
   const handleDownload = async () => {
     if (!reportRef.current) return;
     try {
+      setIsGeneratingPdf(true);
       const canvas = await html2canvas(reportRef.current, { scale: 2 });
       const imgData = canvas.toDataURL("image/png");
       const pdf = new jsPDF("p", "mm", "a4");
@@ -110,6 +112,8 @@ export function AssessmentReportPage() {
       pdf.save(`CEVI_Report_${patient.patientName.replace(/\s+/g, '_')}_${assessment.assessmentDate}.pdf`);
     } catch (err) {
       console.error("PDF generation failed", err);
+    } finally {
+      setIsGeneratingPdf(false);
     }
   };
 
@@ -126,8 +130,8 @@ export function AssessmentReportPage() {
           <Button variant="outline" onClick={() => window.print()}>
             <Printer className="mr-2 h-4 w-4" /> Print
           </Button>
-          <Button onClick={handleDownload} className="bg-[#1a6b5c] hover:bg-[#134d42]">
-            <Download className="mr-2 h-4 w-4" /> Download PDF
+          <Button onClick={handleDownload} disabled={isGeneratingPdf} className="bg-[#1a6b5c] hover:bg-[#134d42]">
+            <Download className="mr-2 h-4 w-4" /> {isGeneratingPdf ? "Generating..." : "Download PDF"}
           </Button>
         </div>
       </div>

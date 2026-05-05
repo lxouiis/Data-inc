@@ -1,12 +1,9 @@
 import { Router } from 'express';
-import { getLegs, upsertLeg } from '../controllers/legController';
-
+import { getLegs, createLeg } from '../controllers/legController';
 
 const router = Router();
 
-
-
-router.post('/', upsertLeg);
+router.post('/', createLeg);
 router.get('/:patientId', getLegs);
 
 export default router;

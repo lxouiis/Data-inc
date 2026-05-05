@@ -21,6 +21,7 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       // Clear store and redirect to login if session expires
       useStore.getState().logout();
+      alert('Session expired, please login again.');
       window.location.hash = '#/login';
     }
     return Promise.reject(error);

@@ -37,11 +37,18 @@ export function Dashboard() {
     (a) => a.assessmentDate === today || a.createdAt.startsWith(today)
   ).length;
 
-  const c4PlusCases = assessments.filter(
-    (a) =>
-      a.rightLeg.ceapTotal?.match(/C[4-6]/) ||
-      a.leftLeg.ceapTotal?.match(/C[4-6]/)
-  ).length;
+  const getLastAssessment = (patientId: string) => {
+    const patientAssessments = assessments.filter(a => a.patientId === patientId);
+    if (patientAssessments.length === 0) return null;
+    return patientAssessments.sort((a, b) => new Date(b.assessmentDate).getTime() - new Date(a.assessmentDate).getTime())[0];
+  };
+
+  // C4+ cases count — use patient-level CEAP from backend
+  const c4PlusCases = patients.filter(p => {
+    const r = p.ceapRight || '';
+    const l = p.ceapLeft || '';
+    return r.match(/C[4-6]/) || l.match(/C[4-6]/);
+  }).length;
 
   const pendingReview = 0;
 
@@ -52,12 +59,6 @@ export function Dashboard() {
     if (ceap.includes("C3")) return "bg-[#ca8a04] text-white font-bold hover:bg-[#ca8a04]";
     if (ceap.includes("C2") || ceap.includes("C1")) return "bg-[#16a34a] text-white font-bold hover:bg-[#16a34a]";
     return "bg-[#6b7280] text-white font-bold hover:bg-[#6b7280]";
-  };
-
-  const getLastAssessment = (patientId: string) => {
-    const patientAssessments = assessments.filter(a => a.patientId === patientId);
-    if (patientAssessments.length === 0) return null;
-    return patientAssessments.sort((a, b) => new Date(b.assessmentDate).getTime() - new Date(a.assessmentDate).getTime())[0];
   };
 
   const handleNewExam = (patientId: string) => {
@@ -219,34 +220,39 @@ export function Dashboard() {
                 ) : (
                   filteredPatients.map((patient) => {
                     const lastAssessment = getLastAssessment(patient.id);
+                    // Use patient-level CEAP from backend (always available)
+                    // Fall back to assessment-level data if loaded
+                    const ceapR = patient.ceapRight || lastAssessment?.rightLeg?.ceapTotal || null;
+                    const ceapL = patient.ceapLeft || lastAssessment?.leftLeg?.ceapTotal || null;
+                    const rvcss = patient.rvcssTotal ?? lastAssessment?.globalRvcssTotal ?? null;
                     return (
                       <tr key={patient.id} className="border-b last:border-0 hover:bg-slate-50/50 transition-colors">
                         <td className="px-4 py-3 font-medium text-slate-900">{patient.patientName}</td>
                         <td className="px-4 py-3 font-mono text-xs">{patient.uhid}</td>
                         <td className="px-4 py-3">{patient.age} / {patient.gender.charAt(0)}</td>
                         <td className="px-4 py-3 text-muted-foreground">
-                          {lastAssessment ? lastAssessment.assessmentDate : "No visits"}
+                          {lastAssessment ? lastAssessment.assessmentDate : (ceapR || ceapL ? "Has visits" : "No visits")}
                         </td>
                         <td className="px-4 py-3">
-                          {lastAssessment?.rightLeg?.ceapTotal ? (
-                            <Badge className={getSeverityColor(lastAssessment.rightLeg.ceapTotal)} variant="secondary">
-                              {lastAssessment.rightLeg.ceapTotal.split(',')[0]}
+                          {ceapR ? (
+                            <Badge className={getSeverityColor(ceapR)} variant="secondary">
+                              {ceapR.split(',')[0]}
                             </Badge>
                           ) : (
                             <span className="text-muted-foreground">-</span>
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          {lastAssessment?.leftLeg?.ceapTotal ? (
-                            <Badge className={getSeverityColor(lastAssessment.leftLeg.ceapTotal)} variant="secondary">
-                              {lastAssessment.leftLeg.ceapTotal.split(',')[0]}
+                          {ceapL ? (
+                            <Badge className={getSeverityColor(ceapL)} variant="secondary">
+                              {ceapL.split(',')[0]}
                             </Badge>
                           ) : (
                             <span className="text-muted-foreground">-</span>
                           )}
                         </td>
                         <td className="px-4 py-3 font-medium">
-                          {lastAssessment ? lastAssessment.globalRvcssTotal : "-"}
+                          {rvcss != null ? rvcss : "-"}
                         </td>
                         <td className="px-4 py-3 text-right">
                           <Button variant="outline" size="sm" onClick={() => handleNewExam(patient.id)}>

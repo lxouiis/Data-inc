@@ -76,8 +76,11 @@ export const dopplerUpload = multer({
 /** POST /api/images — Upload clinical image */
 export async function uploadImage(req: Request, res: Response): Promise<void> {
   try {
-    if (!req.file) {
-      res.status(400).json({ error: 'No file uploaded' });
+    if (!req.file || req.file.size === 0) {
+      if (req.file && req.file.size === 0) {
+        fs.unlinkSync(req.file.path); // remove the 0 byte file
+      }
+      res.status(400).json({ error: 'No file uploaded or file is empty' });
       return;
     }
 
@@ -111,8 +114,11 @@ export async function uploadImage(req: Request, res: Response): Promise<void> {
 /** POST /api/doppler — Upload doppler file */
 export async function uploadDoppler(req: Request, res: Response): Promise<void> {
   try {
-    if (!req.file) {
-      res.status(400).json({ error: 'No file uploaded' });
+    if (!req.file || req.file.size === 0) {
+      if (req.file && req.file.size === 0) {
+        fs.unlinkSync(req.file.path);
+      }
+      res.status(400).json({ error: 'No file uploaded or file is empty' });
       return;
     }
 

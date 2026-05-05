@@ -14,7 +14,7 @@ const safeParse = (val: any) => {
 };
 
 
-/** GET /api/patients — List all patients with latest CEAP + rVCSS per leg */
+/** GET /api/patients — List all patients with latest CEAP + rVCSS per leg side */
 export async function listPatients(req: Request, res: Response): Promise<void> {
   try {
     const patients = await prisma.patient.findMany({
@@ -24,20 +24,25 @@ export async function listPatients(req: Request, res: Response): Promise<void> {
             leg_side: true,
             ceap_full: true,
             rvcss_total: true,
-            created_at: true,
+            visit_number: true,
+            visited_at: true,
           },
-          orderBy: { created_at: 'desc' },
+          orderBy: { visited_at: 'desc' },
         },
       },
       orderBy: { created_at: 'desc' },
     });
 
     const mapped = patients.map(p => {
-      const latestLeg = p.legs && p.legs.length > 0 ? p.legs[0] : null;
+      // Pick only the latest visit per leg side
+      const latestRight = p.legs.find(l => l.leg_side === 'right') || null;
+      const latestLeft  = p.legs.find(l => l.leg_side === 'left')  || null;
       return {
         ...p,
-        ceap_full: latestLeg?.ceap_full || null,
-        rvcss_total: latestLeg?.rvcss_total || 0,
+        ceap_right: latestRight?.ceap_full || null,
+        ceap_left:  latestLeft?.ceap_full  || null,
+        ceap_full:  latestRight?.ceap_full || latestLeft?.ceap_full || null,
+        rvcss_total: Math.max(latestRight?.rvcss_total || 0, latestLeft?.rvcss_total || 0),
         comorbidities: safeParse(p.comorbidities),
         medications: safeParse(p.medications),
         venous_history: safeParse(p.venous_history),
@@ -53,6 +58,7 @@ export async function listPatients(req: Request, res: Response): Promise<void> {
 /** POST /api/patients — Create new patient with UHID uniqueness check */
 export async function createPatient(req: Request, res: Response): Promise<void> {
   try {
+    console.log('[CREATE_PATIENT] req.body:', JSON.stringify(req.body, null, 2));
     const { name, uhid, age, sex, height, weight, bmi, race, smoking, occupation, parity,
       comorbidities, medications, venous_history, dvt_history, clinic, doctor_notes } = req.body;
 
@@ -103,7 +109,14 @@ export async function createPatient(req: Request, res: Response): Promise<void> 
       details: { uhid: patient.uhid }
     });
 
-    res.status(201).json(patient);
+    // Parse JSON fields before returning
+    const response = {
+      ...patient,
+      comorbidities: safeParse(patient.comorbidities),
+      medications: safeParse(patient.medications),
+      venous_history: safeParse(patient.venous_history),
+    };
+    res.status(201).json(response);
   } catch (error) {
     console.error('Create patient error:', error);
     res.status(500).json({ error: 'Database error', detail: (error as Error).message });
@@ -121,6 +134,7 @@ export async function getPatient(req: Request, res: Response): Promise<void> {
             images: { orderBy: { uploaded_at: 'desc' } },
             doppler: { orderBy: { uploaded_at: 'desc' } },
           },
+          orderBy: { visited_at: 'desc' },
         },
       },
     });
@@ -197,7 +211,13 @@ export async function updatePatient(req: Request, res: Response): Promise<void> 
       patientId: patient.id
     });
 
-    res.json(patient);
+    const response = {
+      ...patient,
+      comorbidities: safeParse(patient.comorbidities),
+      medications: safeParse(patient.medications),
+      venous_history: safeParse(patient.venous_history),
+    };
+    res.json(response);
   } catch (error) {
     console.error('Update patient error:', error);
     res.status(500).json({ error: 'Database error', detail: (error as Error).message });

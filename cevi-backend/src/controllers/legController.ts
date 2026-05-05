@@ -15,11 +15,11 @@ const safeParse = (val: any) => {
   }
 };
 
-/** POST /api/legs — Upsert leg assessment by patient_id + leg_side */
-export async function upsertLeg(req: Request, res: Response): Promise<void> {
+/** POST /api/legs — Always INSERT a new leg visit (never upsert) */
+export async function createLeg(req: Request, res: Response): Promise<void> {
   try {
     const {
-      patient_id, leg_side,
+      patient_id, leg_side, assessment_id,
       deep_system, common_femoral_vein, superficial_femoral_vein, popliteal_vein,
       sfj_reflux, gsv_diameter, gsv_reflux, ssv_diameter, ssv_reflux,
       incompetent_perforators, clinical_signs, etiology,
@@ -79,71 +79,64 @@ export async function upsertLeg(req: Request, res: Response): Promise<void> {
       compression: parseInt(compression) || 0,
     });
 
-    const data = {
-      deep_system: deep_system || null,
-      common_femoral_vein: common_femoral_vein || null,
-      superficial_femoral_vein: superficial_femoral_vein || null,
-      popliteal_vein: popliteal_vein || null,
-      sfj_reflux: toBool(sfj_reflux),
-      gsv_diameter: gsv_diameter ? parseFloat(gsv_diameter) : null,
-      gsv_reflux: toBool(gsv_reflux),
-      ssv_diameter: ssv_diameter ? parseFloat(ssv_diameter) : null,
-      ssv_reflux: toBool(ssv_reflux),
-      incompetent_perforators: toBool(incompetent_perforators),
-      clinical_signs: signsStr,
-      etiology: etiology || null,
-      ...ceap,
-      pain: parseInt(pain) || 0,
-      varicose_veins: parseInt(varicose_veins) || 0,
-      edema: parseInt(edema) || 0,
-      pigmentation: parseInt(pigmentation) || 0,
-      inflammation: parseInt(inflammation) || 0,
-      induration: parseInt(induration) || 0,
-      ulcer_count: parseInt(ulcer_count) || 0,
-      ulcer_duration: parseInt(ulcer_duration) || 0,
-      ulcer_size: parseInt(ulcer_size) || 0,
-      compression: parseInt(compression) || 0,
-      rvcss_total,
-      ulcer_present: toBool(ulcer_present),
-      ulcer_location: ulcer_location || null,
-      ulcer_size_cm: ulcer_size_cm ? parseFloat(ulcer_size_cm) : null,
-      ulcer_type: ulcer_type || null,
-      ulcer_edges: ulcer_edges || null,
-      ulcer_base: ulcer_base || null,
-      skin_changes: skin_changes || null,
-      swelling_grade: swelling_grade || null,
-      pain_vas: pain_vas != null ? parseInt(pain_vas) : null,
-    };
-
-    // Since @@unique([patient_id, leg_side]) was removed to allow history,
-    // we fulfill the 'upsert' rule without breaking history by acting on the MOST RECENT leg visit.
-    const latestLeg = await prisma.leg.findFirst({
+    // Calculate visit_number: count existing visits for this patient+side, then +1
+    const existingVisits = await prisma.leg.count({
       where: { patient_id, leg_side },
-      orderBy: { created_at: 'desc' }
+    });
+    const visit_number = existingVisits + 1;
+
+    // ALWAYS INSERT a new record — never update/overwrite
+    const leg = await prisma.leg.create({
+      data: {
+        patient_id,
+        leg_side,
+        visit_number,
+        assessment_id: assessment_id || null,
+        deep_system: deep_system || null,
+        common_femoral_vein: common_femoral_vein || null,
+        superficial_femoral_vein: superficial_femoral_vein || null,
+        popliteal_vein: popliteal_vein || null,
+        sfj_reflux: toBool(sfj_reflux),
+        gsv_diameter: gsv_diameter ? parseFloat(gsv_diameter) : null,
+        gsv_reflux: toBool(gsv_reflux),
+        ssv_diameter: ssv_diameter ? parseFloat(ssv_diameter) : null,
+        ssv_reflux: toBool(ssv_reflux),
+        incompetent_perforators: toBool(incompetent_perforators),
+        clinical_signs: signsStr,
+        etiology: etiology || null,
+        ...ceap,
+        pain: parseInt(pain) || 0,
+        varicose_veins: parseInt(varicose_veins) || 0,
+        edema: parseInt(edema) || 0,
+        pigmentation: parseInt(pigmentation) || 0,
+        inflammation: parseInt(inflammation) || 0,
+        induration: parseInt(induration) || 0,
+        ulcer_count: parseInt(ulcer_count) || 0,
+        ulcer_duration: parseInt(ulcer_duration) || 0,
+        ulcer_size: parseInt(ulcer_size) || 0,
+        compression: parseInt(compression) || 0,
+        rvcss_total,
+        ulcer_present: toBool(ulcer_present),
+        ulcer_location: ulcer_location || null,
+        ulcer_size_cm: ulcer_size_cm ? parseFloat(ulcer_size_cm) : null,
+        ulcer_type: ulcer_type || null,
+        ulcer_edges: ulcer_edges || null,
+        ulcer_base: ulcer_base || null,
+        skin_changes: skin_changes || null,
+        swelling_grade: swelling_grade || null,
+        pain_vas: pain_vas != null ? parseInt(pain_vas) : null,
+      },
+      include: { images: true, doppler: true },
     });
 
-    let leg;
-    if (latestLeg) {
-      leg = await prisma.leg.update({
-        where: { id: latestLeg.id },
-        data,
-        include: { images: true, doppler: true },
-      });
-    } else {
-      leg = await prisma.leg.create({
-        data: { patient_id, leg_side, ...data },
-        include: { images: true, doppler: true },
-      });
-    }
-
-    res.status(200).json(leg);
+    res.status(201).json(leg);
   } catch (error) {
-    console.error('Upsert leg error:', error);
+    console.error('Create leg error:', error);
     res.status(500).json({ error: 'Database error', detail: (error as Error).message });
   }
 }
 
-/** GET /api/legs/:patientId — Get both legs for a patient */
+/** GET /api/legs/:patientId — Get ALL visits for a patient, sorted latest first */
 export async function getLegs(req: Request, res: Response): Promise<void> {
   try {
     const patientId = req.params.patientId as string;
@@ -160,7 +153,7 @@ export async function getLegs(req: Request, res: Response): Promise<void> {
         images: { orderBy: { uploaded_at: 'desc' } },
         doppler: { orderBy: { uploaded_at: 'desc' } },
       },
-      orderBy: { leg_side: 'asc' },
+      orderBy: [{ visited_at: 'desc' }, { leg_side: 'asc' }],
     });
 
     const mapped = legs.map(l => ({

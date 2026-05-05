@@ -1,5 +1,6 @@
 
-import { useState, useMemo } from "react";
+
+import { useState, useMemo, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useStore, type LegExam } from "@/store/useStore";
 import { Button } from "@/components/ui/button";
@@ -52,7 +53,9 @@ export function AssessmentForm() {
   const getPatientById = useStore(s => s.getPatientById);
   const addAssessment   = useStore(s => s.addAssessment);
   const addPatient      = useStore(s => s.addPatient);
+  const updatePatient   = useStore(s => s.updatePatient);
   const isUhidTaken     = useStore(s => s.isUhidTaken);
+  const fetchAssessments = useStore(s => s.fetchAssessments);
   const existingPatient = patientId && patientId !== "new" ? getPatientById(patientId) : null;
   const latestAssessment = existingPatient 
     ? useStore.getState().getAssessmentsByPatientId(existingPatient.id).sort((a,b) => new Date(b.assessmentDate).getTime() - new Date(a.assessmentDate).getTime())[0]
@@ -60,6 +63,7 @@ export function AssessmentForm() {
 
   // ── Form error state ────────────────
   const [uhidError, setUhidError] = useState("");
+  const [dataLoaded, setDataLoaded] = useState(false);
 
   // ── Patient basics ─────────────────
   const [patientName, setPatientName] = useState(existingPatient?.patientName || "");
@@ -83,8 +87,8 @@ export function AssessmentForm() {
   }, [height, weight]);
 
   // ── Section 1: History ─────────────
-  const [comorbidities, setComorbidities] = useState<string[]>(latestAssessment?.comorbidities || []);
-  const [venousHistory, setVenousHistory] = useState<string[]>(latestAssessment?.venousHistory || []);
+  const [comorbidities, setComorbidities] = useState<string[]>(latestAssessment?.comorbidities || existingPatient?.comorbidities || []);
+  const [venousHistory, setVenousHistory] = useState<string[]>(latestAssessment?.venousHistory || existingPatient?.venousHistory || []);
   const [medications, setMedications]     = useState<string[]>(existingPatient?.currentMedications || []);
   const [clinicalNotes, setClinicalNotes] = useState(latestAssessment?.clinicalNotes || "");
 
@@ -117,6 +121,66 @@ export function AssessmentForm() {
 
   // ── Doppler report PDFs ─────────────
   const [dopplerPdfs, setDopplerPdfs] = useState<PdfFile[]>([]);
+
+  // ── Fetch previous assessments on mount for existing patients ──
+  useEffect(() => {
+    if (!existingPatient || dataLoaded) return;
+    
+    fetchAssessments(existingPatient.id).then(() => {
+      const assessments = useStore.getState().getAssessmentsByPatientId(existingPatient.id);
+      const latest = assessments.sort((a, b) => 
+        new Date(b.assessmentDate).getTime() - new Date(a.assessmentDate).getTime()
+      )[0];
+      
+      if (latest) {
+        // Pre-populate demographics from patient
+        if (existingPatient.height) setHeight(existingPatient.height.toString());
+        if (existingPatient.weight) setWeight(existingPatient.weight.toString());
+        if (existingPatient.ethnicity) setEthnicity(existingPatient.ethnicity);
+        if (existingPatient.smokingStatus?.length) setSmoking(existingPatient.smokingStatus);
+        if (existingPatient.occupationType?.length) setOccupation(existingPatient.occupationType);
+        if (existingPatient.parity) setParity(existingPatient.parity.toString());
+
+        // Pre-populate from latest assessment
+        if (latest.comorbidities?.length) setComorbidities(latest.comorbidities);
+        if (latest.venousHistory?.length) setVenousHistory(latest.venousHistory);
+        if (latest.clinicalNotes) setClinicalNotes(latest.clinicalNotes);
+        if (latest.rightPainVas) setRightPainVas(latest.rightPainVas);
+        if (latest.leftPainVas) setLeftPainVas(latest.leftPainVas);
+        if (latest.veinesNotes) setVeinesNotes(latest.veinesNotes);
+
+        // Pre-populate leg data (doppler, rVCSS, clinical signs)
+        if (latest.rightLeg) {
+          setRightLeg({ ...latest.rightLeg });
+          setRightCommonFemoral(latest.rightLeg.commonFemoralVein || "Normal");
+          setRightSuperficialFemoral(latest.rightLeg.superficialFemoralVein || "Normal");
+          setRightPoplitealStatus(latest.rightLeg.poplitealVeinStatus || "Normal");
+          setRightEtiology(latest.rightLeg.etiology || "");
+        }
+        if (latest.leftLeg) {
+          setLeftLeg({ ...latest.leftLeg });
+          setLeftCommonFemoral(latest.leftLeg.commonFemoralVein || "Normal");
+          setLeftSuperficialFemoral(latest.leftLeg.superficialFemoralVein || "Normal");
+          setLeftPoplitealStatus(latest.leftLeg.poplitealVeinStatus || "Normal");
+          setLeftEtiology(latest.leftLeg.etiology || "");
+        }
+      }
+      setDataLoaded(true);
+    });
+  }, [existingPatient, dataLoaded, fetchAssessments]);
+
+  // ── Prevent accidental navigation/closing ──
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      // If we have some data, warn before closing tab
+      if (patientName || uhid) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [patientName, uhid]);
 
   // ── Computed CEAP & rVCSS ──────────
   const computeCEAP = (leg: LegExam, history: string[], etiology: string) => {
@@ -164,8 +228,17 @@ export function AssessmentForm() {
     (isRight ? setRightLeg : setLeftLeg)(prev => ({ ...prev, [field]: value }));
   };
 
+  const [isSaving, setIsSaving] = useState(false);
+
   // ── Save ───────────────────────────
   const handleSave = async () => {
+    if (rightLeg.clinicalSigns.length === 0 && leftLeg.clinicalSigns.length === 0) {
+      if (!window.confirm("You have not selected any Clinical Signs for either leg. This will result in a C0 (No disease) classification. Do you want to proceed?")) {
+        return;
+      }
+    }
+
+    setIsSaving(true);
     let finalPatientId: string | null | undefined = patientId;
     if (!existingPatient || patientId === "new") {
       // Guard: check duplicate UHID before creating patient
@@ -183,12 +256,12 @@ export function AssessmentForm() {
           weight: parseFloat(weight) || undefined,
           bmi: bmi || undefined,
           ethnicity,
-          smokingStatus: smoking.length ? smoking : undefined,
-          occupationType: occupation.length ? occupation : undefined,
+          smokingStatus: smoking,
+          occupationType: occupation,
           parity: parity ? parseInt(parity) : undefined,
-          currentMedications: medications.length ? medications : undefined,
-          comorbidities: comorbidities.length ? comorbidities : undefined,
-          venousHistory: venousHistory.length ? venousHistory : undefined,
+          currentMedications: medications,
+          comorbidities: comorbidities,
+          venousHistory: venousHistory,
         });
         
         if (!newId) throw new Error("Failed to register patient (no ID returned).");
@@ -197,6 +270,28 @@ export function AssessmentForm() {
       } catch (err: any) {
         setUhidError(err.message || "Failed to register patient.");
         return;
+      }
+    } else {
+      // Patient already exists — update their demographics so height/weight/
+      // smoking/comorbidities/etc. are persisted (not silently dropped)
+      try {
+        await updatePatient(existingPatient.id, {
+          patientName: patientName.trim(),
+          age: parseInt(age) || existingPatient.age,
+          gender,
+          height: parseFloat(height) || undefined,
+          weight: parseFloat(weight) || undefined,
+          bmi: bmi || undefined,
+          ethnicity,
+          smokingStatus: smoking,
+          occupationType: occupation,
+          parity: parity ? parseInt(parity) : undefined,
+          currentMedications: medications,
+          comorbidities: comorbidities,
+          venousHistory: venousHistory,
+        });
+      } catch (err: any) {
+        console.error('Failed to update patient demographics:', err);
       }
     }
 
@@ -227,6 +322,7 @@ export function AssessmentForm() {
         throw new Error("Failed to create assessment");
       }
     } catch (err: any) {
+      setIsSaving(false);
       alert("Failed to save assessment: " + (err.message || "Unknown error"));
     }
   };
@@ -730,8 +826,8 @@ export function AssessmentForm() {
         <div className="flex justify-end gap-4 fixed bottom-0 left-0 right-0 bg-white border-t p-4 z-50">
           <div className="container mx-auto flex justify-end gap-4 px-4 sm:px-8 max-w-6xl">
             <Button variant="outline" size="lg" onClick={()=>navigate("/")}>Cancel</Button>
-            <Button size="lg" className="w-full sm:w-auto bg-[#1a6b5c] hover:bg-[#134d42]" onClick={handleSave}>
-              <Save className="mr-2 h-5 w-5" /> Calculate CEAP & Save
+            <Button size="lg" className="w-full sm:w-auto bg-[#1a6b5c] hover:bg-[#134d42]" onClick={handleSave} disabled={isSaving}>
+              <Save className="mr-2 h-5 w-5" /> {isSaving ? "Saving..." : "Calculate CEAP & Save"}
             </Button>
           </div>
         </div>

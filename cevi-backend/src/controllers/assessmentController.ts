@@ -110,6 +110,21 @@ export async function createAssessment(req: Request, res: Response): Promise<voi
       return;
     }
 
+    // Edge case: double submission check
+    const recentAssessment = await prisma.assessment.findFirst({
+      where: {
+        patient_id: patientId,
+        assessment_date: {
+          gte: new Date(Date.now() - 10000) // within the last 10 seconds
+        }
+      }
+    });
+
+    if (recentAssessment) {
+      res.status(409).json({ error: 'Duplicate submission detected. Assessment was already created.' });
+      return;
+    }
+
     const rightData = buildLegData(rightLeg, 'right', patientId);
     const leftData = buildLegData(leftLeg, 'left', patientId);
     const globalRvcss = (rightData.rvcss_total || 0) + (leftData.rvcss_total || 0);
@@ -146,8 +161,12 @@ export async function createAssessment(req: Request, res: Response): Promise<voi
     });
 
     res.status(201).json(assessment);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Create assessment error:', error);
+    if (error.code === 'P2002') {
+      res.status(409).json({ error: 'Conflict: Unique constraint failed. Duplicate assessment detected.' });
+      return;
+    }
     res.status(500).json({ error: 'Database error', detail: (error as Error).message });
   }
 }

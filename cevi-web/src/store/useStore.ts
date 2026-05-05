@@ -13,6 +13,9 @@ export interface Patient {
   gender: Gender;
   createdAt: string;
   ceapGrade?: string;
+  ceapRight?: string;
+  ceapLeft?: string;
+  rvcssTotal?: number;
   // Extended demographics
   height?: number;
   weight?: number;
@@ -68,6 +71,13 @@ export interface LegExam {
 }
 
 
+const safeJsonParse = (val: any): any => {
+  if (!val) return undefined;
+  if (Array.isArray(val)) return val;
+  if (typeof val !== 'string') return val;
+  try { return JSON.parse(val); } catch { return [val]; }
+};
+
 const mapPatientFromBackend = (p: any): Patient => ({
   id: p.id,
   patientName: p.name,
@@ -76,16 +86,19 @@ const mapPatientFromBackend = (p: any): Patient => ({
   gender: p.sex,
   createdAt: p.created_at,
   ceapGrade: p.ceap_full,
+  ceapRight: p.ceap_right || null,
+  ceapLeft: p.ceap_left || null,
+  rvcssTotal: p.rvcss_total ?? 0,
   height: p.height,
   weight: p.weight,
   bmi: p.bmi?.toString(),
   ethnicity: p.race,
-  smokingStatus: p.smoking ? (typeof p.smoking === 'string' ? JSON.parse(p.smoking) : p.smoking) : undefined,
-  occupationType: p.occupation ? (typeof p.occupation === 'string' ? JSON.parse(p.occupation) : p.occupation) : undefined,
+  smokingStatus: safeJsonParse(p.smoking),
+  occupationType: safeJsonParse(p.occupation),
   parity: p.parity,
-  comorbidities: p.comorbidities ? (typeof p.comorbidities === 'string' ? JSON.parse(p.comorbidities) : p.comorbidities) : undefined,
-  venousHistory: p.venous_history ? (typeof p.venous_history === 'string' ? JSON.parse(p.venous_history) : p.venous_history) : undefined,
-  currentMedications: p.medications ? (typeof p.medications === 'string' ? JSON.parse(p.medications) : p.medications) : undefined,
+  comorbidities: safeJsonParse(p.comorbidities),
+  venousHistory: safeJsonParse(p.venous_history),
+  currentMedications: safeJsonParse(p.medications),
 });
 
 const initialLegState: LegExam = {
@@ -227,12 +240,12 @@ export const useStore = create<CeviState>()(
             weight: patient.weight,
             bmi: patient.bmi,
             race: patient.ethnicity,
-            smoking: patient.smokingStatus ? JSON.stringify(patient.smokingStatus) : undefined,
-            occupation: patient.occupationType ? JSON.stringify(patient.occupationType) : undefined,
+            smoking: patient.smokingStatus && patient.smokingStatus.length > 0 ? JSON.stringify(patient.smokingStatus) : undefined,
+            occupation: patient.occupationType && patient.occupationType.length > 0 ? JSON.stringify(patient.occupationType) : undefined,
             parity: patient.parity,
-            comorbidities: patient.comorbidities ? JSON.stringify(patient.comorbidities) : undefined,
-            venous_history: patient.venousHistory ? JSON.stringify(patient.venousHistory) : undefined,
-            medications: patient.currentMedications ? JSON.stringify(patient.currentMedications) : undefined,
+            comorbidities: patient.comorbidities && patient.comorbidities.length > 0 ? JSON.stringify(patient.comorbidities) : undefined,
+            venous_history: patient.venousHistory && patient.venousHistory.length > 0 ? JSON.stringify(patient.venousHistory) : undefined,
+            medications: patient.currentMedications && patient.currentMedications.length > 0 ? JSON.stringify(patient.currentMedications) : undefined,
           };
           const res = await api.post('/patients', payload);
           // Map response back to frontend format
@@ -247,7 +260,23 @@ export const useStore = create<CeviState>()(
 
       updatePatient: async (id, data) => {
         try {
-          const res = await api.put(`/patients/${id}`, data);
+          // Map frontend fields to backend fields (same mapping as addPatient)
+          const payload: Record<string, any> = {};
+          if (data.patientName !== undefined) payload.name = data.patientName;
+          if (data.age !== undefined) payload.age = data.age;
+          if (data.gender !== undefined) payload.sex = data.gender;
+          if (data.height !== undefined) payload.height = data.height;
+          if (data.weight !== undefined) payload.weight = data.weight;
+          if (data.bmi !== undefined) payload.bmi = data.bmi;
+          if (data.ethnicity !== undefined) payload.race = data.ethnicity;
+          if (data.smokingStatus !== undefined) payload.smoking = data.smokingStatus && data.smokingStatus.length > 0 ? JSON.stringify(data.smokingStatus) : null;
+          if (data.occupationType !== undefined) payload.occupation = data.occupationType && data.occupationType.length > 0 ? JSON.stringify(data.occupationType) : null;
+          if (data.parity !== undefined) payload.parity = data.parity;
+          if (data.comorbidities !== undefined) payload.comorbidities = data.comorbidities && data.comorbidities.length > 0 ? JSON.stringify(data.comorbidities) : null;
+          if (data.venousHistory !== undefined) payload.venous_history = data.venousHistory && data.venousHistory.length > 0 ? JSON.stringify(data.venousHistory) : null;
+          if (data.currentMedications !== undefined) payload.medications = data.currentMedications && data.currentMedications.length > 0 ? JSON.stringify(data.currentMedications) : null;
+
+          const res = await api.put(`/patients/${id}`, payload);
           set((state) => ({ patients: state.patients.map((p) => p.id === id ? mapPatientFromBackend(res.data) : p) }));
         } catch (error) {
           console.error('Update patient failed:', error);
