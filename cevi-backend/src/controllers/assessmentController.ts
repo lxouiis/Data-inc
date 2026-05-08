@@ -146,18 +146,28 @@ export async function createAssessment(req: Request, res: Response): Promise<voi
       });
 
       // Insert legs linking to assessment
-      await tx.leg.create({ data: { ...rightData, assessment_id: newAss.id } });
-      await tx.leg.create({ data: { ...leftData, assessment_id: newAss.id } });
+      const rightLegRecord = await tx.leg.create({ data: { ...rightData, assessment_id: newAss.id } });
+      const leftLegRecord = await tx.leg.create({ data: { ...leftData, assessment_id: newAss.id } });
 
-      return newAss;
+      console.log('[createAssessment] Created legs:', { right: rightLegRecord.id, left: leftLegRecord.id });
+
+      const result = await tx.assessment.findUnique({
+        where: { id: newAss.id },
+        include: { legs: true },
+      });
+
+      console.log('[createAssessment] Final result legs count:', result?.legs?.length);
+      return result;
     });
+
+    console.log('[createAssessment] Sending response with', assessment?.legs?.length, 'legs');
 
     logAudit({
       doctorId: req.user?.id,
       doctorName: req.user?.name,
       action: 'CREATE_ASSESSMENT',
       patientId,
-      details: JSON.stringify({ assessmentId: assessment.id }),
+      details: JSON.stringify({ assessmentId: assessment?.id }),
     });
 
     res.status(201).json(assessment);

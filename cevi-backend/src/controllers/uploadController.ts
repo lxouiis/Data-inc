@@ -14,6 +14,8 @@ const imageStorage = multer.diskStorage({
         include: { patient: { select: { uhid: true } } },
       });
       if (!leg) return cb(new Error('Leg not found'), '');
+      if (!leg.patient) return cb(new Error('Associated patient not found'), '');
+      
       const dir = path.join(process.cwd(), 'storage', 'patients', leg.patient.uhid, 'images');
       fs.mkdirSync(dir, { recursive: true });
       cb(null, dir);
@@ -49,6 +51,8 @@ const dopplerStorage = multer.diskStorage({
         include: { patient: { select: { uhid: true } } },
       });
       if (!leg) return cb(new Error('Leg not found'), '');
+      if (!leg.patient) return cb(new Error('Associated patient not found'), '');
+      
       const dir = path.join(process.cwd(), 'storage', 'patients', leg.patient.uhid, 'doppler');
       fs.mkdirSync(dir, { recursive: true });
       cb(null, dir);
@@ -76,6 +80,9 @@ export const dopplerUpload = multer({
 /** POST /api/images — Upload clinical image */
 export async function uploadImage(req: Request, res: Response): Promise<void> {
   try {
+    console.log('[uploadImage] req.body:', req.body);
+    console.log('[uploadImage] req.file:', req.file ? { path: req.file.path, size: req.file.size, originalname: req.file.originalname } : 'NO FILE');
+
     if (!req.file || req.file.size === 0) {
       if (req.file && req.file.size === 0) {
         fs.unlinkSync(req.file.path); // remove the 0 byte file
@@ -87,14 +94,18 @@ export async function uploadImage(req: Request, res: Response): Promise<void> {
     const legId = parseInt(req.body.leg_id);
     const viewType = req.body.view_type || 'photo';
 
+    console.log('[uploadImage] legId:', legId, 'viewType:', viewType);
+
     const leg = await prisma.leg.findUnique({ where: { id: legId } });
     if (!leg) {
+      console.error('[uploadImage] Leg not found for id:', legId);
       res.status(404).json({ error: 'Leg not found' });
       return;
     }
 
     // Store relative path
     const relativePath = path.relative(process.cwd(), req.file.path);
+    console.log('[uploadImage] Saving to DB with file_path:', relativePath);
 
     const image = await prisma.image.create({
       data: {
@@ -104,6 +115,7 @@ export async function uploadImage(req: Request, res: Response): Promise<void> {
       },
     });
 
+    console.log('[uploadImage] Created image record:', image);
     res.status(201).json(image);
   } catch (error) {
     console.error('Upload image error:', error);
