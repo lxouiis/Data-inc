@@ -1,17 +1,23 @@
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { UploadCloud, X } from 'lucide-react';
 
-export function ImageUpload({ title }: { title: string }) {
-  const [files, setFiles] = useState<{ url: string; file: File }[]>([]);
+export type UploadedImage = { url: string; file: File };
 
+interface ImageUploadProps {
+  title: string;
+  files: UploadedImage[];
+  onChange: (files: UploadedImage[]) => void;
+}
+
+export function ImageUpload({ title, files, onChange }: ImageUploadProps) {
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const newFiles = acceptedFiles.map(file => ({
       file,
       url: URL.createObjectURL(file)
     }));
-    setFiles(prev => [...prev, ...newFiles]);
-  }, []);
+    onChange([...files, ...newFiles]);
+  }, [files, onChange]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -19,12 +25,10 @@ export function ImageUpload({ title }: { title: string }) {
   });
 
   const removeFile = (index: number) => {
-    setFiles(prev => {
-      const newFiles = [...prev];
-      URL.revokeObjectURL(newFiles[index].url);
-      newFiles.splice(index, 1);
-      return newFiles;
-    });
+    const newFiles = [...files];
+    URL.revokeObjectURL(newFiles[index].url);
+    newFiles.splice(index, 1);
+    onChange(newFiles);
   };
 
   return (

@@ -10,8 +10,9 @@ import { Label } from "@/components/ui/label";
 import { ChipToggle } from "@/components/ui/chip-toggle";
 import { ScoreInput } from "@/components/ui/score-input";
 import { CeapBadge } from "@/components/ui/ceap-badge";
-import { ImageUpload } from "@/components/ui/image-upload";
+import { ImageUpload, type UploadedImage } from "@/components/ui/image-upload";
 import { LegImageUpload, type LegPhoto } from "@/components/ui/leg-image-upload";
+import api from "@/lib/api";
 import { PdfUpload, type PdfFile } from "@/components/ui/pdf-upload";
 import { ArrowLeft, Save } from "lucide-react";
 import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer } from "recharts";
@@ -115,12 +116,11 @@ export function AssessmentForm() {
   const [leftPoplitealStatus, setLeftPoplitealStatus]       = useState(latestAssessment?.leftLeg.poplitealVeinStatus || "Normal");
   const [leftEtiology, setLeftEtiology]                     = useState(latestAssessment?.leftLeg.etiology || "");
 
-  // ── Leg clinical photos ─────────────
+  // ── File Upload States ─────────────
   const [rightLegPhotos, setRightLegPhotos] = useState<LegPhoto[]>([]);
-  const [leftLegPhotos, setLeftLegPhotos]   = useState<LegPhoto[]>([]);
-
-  // ── Doppler report PDFs ─────────────
+  const [leftLegPhotos, setLeftLegPhotos] = useState<LegPhoto[]>([]);
   const [dopplerPdfs, setDopplerPdfs] = useState<PdfFile[]>([]);
+  const [dopplerImages, setDopplerImages] = useState<UploadedImage[]>([]);
 
   // ── Fetch previous assessments on mount for existing patients ──
   useEffect(() => {
@@ -296,7 +296,7 @@ export function AssessmentForm() {
     }
 
     try {
-      const assessmentId = await addAssessment({
+      const assessmentResponse = await addAssessment({
         patientId: finalPatientId!,
         comorbidities, venousHistory, clinicalNotes,
         rightLeg: { 
@@ -316,8 +316,101 @@ export function AssessmentForm() {
         rightPainVas, leftPainVas, veinesNotes
       });
 
-      if (assessmentId) {
-        navigate(`/assessment/${assessmentId}/report`);
+      if (assessmentResponse && assessmentResponse.id) {
+        // Upload images if any
+        const legs = assessmentResponse.legs || [];
+        const dbRightLeg = legs.find((l: any) => l.leg_side === 'right');
+        const dbLeftLeg = legs.find((l: any) => l.leg_side === 'left');
+
+        console.log('[CEVI] Assessment created:', assessmentResponse.id);
+        console.log('[CEVI] Legs returned:', legs.map((l: any) => ({ id: l.id, side: l.leg_side })));
+
+        const uploadPromises: Promise<unknown>[] = [];
+
+        // Right leg clinical photos
+        if (dbRightLeg && rightLegPhotos.length > 0) {
+          console.log('[CEVI] Uploading', rightLegPhotos.length, 'right leg photos');
+          rightLegPhotos.forEach((photo) => {
+            if (photo && photo.file) {
+              const formData = new FormData();
+              formData.append('leg_id', String(dbRightLeg.id));
+              formData.append('view_type', photo.view_type);
+              formData.append('image', photo.file);
+              uploadPromises.push(
+                api.post('/images', formData)
+                  .then(r => { console.log('[CEVI] Right image uploaded:', r.data); return r; })
+                  .catch(e => { console.error('[CEVI] Right image upload failed:', e.response?.data || e.message); throw e; })
+              );
+            }
+          });
+        }
+
+        // Left leg clinical photos
+        if (dbLeftLeg && leftLegPhotos.length > 0) {
+          console.log('[CEVI] Uploading', leftLegPhotos.length, 'left leg photos');
+          leftLegPhotos.forEach((photo) => {
+            if (photo && photo.file) {
+              const formData = new FormData();
+              formData.append('leg_id', String(dbLeftLeg.id));
+              formData.append('view_type', photo.view_type);
+              formData.append('image', photo.file);
+              uploadPromises.push(
+                api.post('/images', formData)
+                  .then(r => { console.log('[CEVI] Left image uploaded:', r.data); return r; })
+                  .catch(e => { console.error('[CEVI] Left image upload failed:', e.response?.data || e.message); throw e; })
+              );
+            }
+          });
+        }
+
+        // Doppler PDFs (attach to first leg found)
+        if (dopplerPdfs && dopplerPdfs.length > 0 && (dbRightLeg || dbLeftLeg)) {
+          const targetLegId = String((dbRightLeg || dbLeftLeg).id);
+          console.log('[CEVI] Uploading', dopplerPdfs.length, 'doppler PDFs to leg', targetLegId);
+          dopplerPdfs.forEach(pdf => {
+            if (pdf.file) {
+              const formData = new FormData();
+              formData.append('leg_id', targetLegId);
+              formData.append('doppler_file', pdf.file);
+              uploadPromises.push(
+                api.post('/doppler', formData)
+                  .then(r => { console.log('[CEVI] Doppler uploaded:', r.data); return r; })
+                  .catch(e => { console.error('[CEVI] Doppler upload failed:', e.response?.data || e.message); throw e; })
+              );
+            }
+          });
+        }
+
+        // Doppler Screenshot Images
+        if (dopplerImages && dopplerImages.length > 0 && (dbRightLeg || dbLeftLeg)) {
+          const targetLegId = String((dbRightLeg || dbLeftLeg).id);
+          console.log('[CEVI] Uploading', dopplerImages.length, 'doppler screenshots to leg', targetLegId);
+          dopplerImages.forEach(img => {
+            if (img.file) {
+              const formData = new FormData();
+              formData.append('leg_id', targetLegId);
+              formData.append('view_type', 'doppler_screenshot');
+              formData.append('image', img.file);
+              uploadPromises.push(
+                api.post('/images', formData)
+                  .then(r => { console.log('[CEVI] Doppler screenshot uploaded:', r.data); return r; })
+                  .catch(e => { console.error('[CEVI] Doppler screenshot upload failed:', e.response?.data || e.message); throw e; })
+              );
+            }
+          });
+        }
+
+        if (uploadPromises.length > 0) {
+          console.log('[CEVI] Waiting for', uploadPromises.length, 'uploads...');
+          const results = await Promise.allSettled(uploadPromises);
+          const failed = results.filter(r => r.status === 'rejected');
+          if (failed.length > 0) {
+            console.warn('[CEVI]', failed.length, 'upload(s) failed');
+          }
+          console.log('[CEVI] All uploads settled');
+        }
+
+        navigate(`/assessment/${assessmentResponse.id}/report`);
       } else {
         throw new Error("Failed to create assessment");
       }
@@ -807,7 +900,7 @@ export function AssessmentForm() {
               <LegImageUpload leg="Right" photos={rightLegPhotos} onChange={setRightLegPhotos} />
               <LegImageUpload leg="Left"  photos={leftLegPhotos}  onChange={setLeftLegPhotos} />
             </div>
-            <ImageUpload title="Doppler USG Screenshots" />
+            <ImageUpload title="Doppler USG Screenshots" files={dopplerImages} onChange={setDopplerImages} />
           </CardContent>
         </Card>
 

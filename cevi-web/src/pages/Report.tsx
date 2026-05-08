@@ -74,7 +74,7 @@ export function AssessmentReportPage() {
 
   useEffect(() => {
     if (assessments.length > 0 && !getPatientById(assessments[0].patientId)) {
-        fetchPatients();
+      fetchPatients();
     }
   }, [id, assessment, fetchPatients, assessments]);
 
@@ -100,30 +100,43 @@ export function AssessmentReportPage() {
       setIsGeneratingPdf(true);
       // Let charts render completely
       await new Promise(r => setTimeout(r, 500));
-      
-      const canvas = await html2canvas(reportRef.current, { scale: 2, useCORS: true, logging: false });
-      const imgData = canvas.toDataURL("image/png");
+
       const pdf = new jsPDF("p", "mm", "a4");
-      
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
-      
-      let heightLeft = imgHeight;
-      let position = 0;
+      const pages = reportRef.current.querySelectorAll('.pdf-page');
 
-      // Add first page
-      pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
-      heightLeft -= pageHeight;
+      if (pages.length > 0) {
+        for (let i = 0; i < pages.length; i++) {
+          const page = pages[i] as HTMLElement;
+          const canvas = await html2canvas(page, { scale: 2, useCORS: true, logging: false });
+          const imgData = canvas.toDataURL("image/png");
+          
+          const pdfWidth = pdf.internal.pageSize.getWidth();
+          const imgHeight = (canvas.height * pdfWidth) / canvas.width;
 
-      // Add additional pages if content overflows A4 height
-      while (heightLeft > 0) {
-        position -= pageHeight;
-        pdf.addPage();
+          if (i > 0) pdf.addPage();
+          pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, imgHeight);
+        }
+      } else {
+        const canvas = await html2canvas(reportRef.current, { scale: 2, useCORS: true, logging: false });
+        const imgData = canvas.toDataURL("image/png");
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const imgHeight = (canvas.height * pdfWidth) / canvas.width;
+
+        let heightLeft = imgHeight;
+        let position = 0;
+
         pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
         heightLeft -= pageHeight;
+
+        while (heightLeft > 0) {
+          position -= pageHeight;
+          pdf.addPage();
+          pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
+          heightLeft -= pageHeight;
+        }
       }
-      
+
       pdf.save(`CEVI_Report_${patient.patientName.replace(/\s+/g, '_')}_${assessment.assessmentDate}.pdf`);
     } catch (err) {
       console.error("PDF generation failed", err);
@@ -144,7 +157,7 @@ export function AssessmentReportPage() {
     { subject: 'Ulcer Size', right: assessment.rightLeg.ulcerSizeScore || 0, left: assessment.leftLeg.ulcerSizeScore || 0, fullMark: 3 },
     { subject: 'Compliance', right: assessment.rightLeg.compressionCompliance || 0, left: assessment.leftLeg.compressionCompliance || 0, fullMark: 3 }
   ];
-  
+
   // Calculate global rvcss manually in case it isn't calculated in Assessment
   const globalRvcssTotal = assessment.rightLeg.rvcssTotal + assessment.leftLeg.rvcssTotal;
 
@@ -167,16 +180,15 @@ export function AssessmentReportPage() {
         </div>
       </div>
 
-      <div ref={reportRef} className="bg-white px-8 py-10 shadow-sm border rounded-lg print:shadow-none print:border-0" style={{ minHeight: '297mm' }}>
-        {/* Header */}
+      <div ref={reportRef} className="bg-white shadow-sm border rounded-lg print:shadow-none print:border-0 flex flex-col">
+        {/* PAGE 1 */}
+        <div className="pdf-page px-8 py-10" style={{ minHeight: '297mm', pageBreakAfter: 'always' }}>
+          {/* Header */}
         <div className="border-b-2 border-[#1a6b5c] pb-6 mb-8">
           <div className="flex justify-between items-start">
             <div className="flex items-center gap-4">
               <img src={`${import.meta.env.BASE_URL}kle-logo.png`} alt="KLE Logo" className="h-12 object-contain" />
-              <div>
-                <h2 className="text-3xl font-heading font-bold text-[#1a6b5c]">CEVI</h2>
-                <p className="text-sm font-medium text-slate-500 uppercase tracking-wider">Clinical Electronic Venous Intelligence</p>
-              </div>
+              <p className="text-sm font-medium text-slate-500 uppercase tracking-wider"></p>
             </div>
             <div className="text-right text-sm text-slate-600 space-y-1">
               <p><strong>Doctor:</strong> {assessment.assessedBy}</p>
@@ -224,11 +236,15 @@ export function AssessmentReportPage() {
           <LegReport leg={assessment.rightLeg} label="Right" />
           <LegReport leg={assessment.leftLeg} label="Left" />
         </div>
+        </div>
 
-        {/* rVCSS Visual Graphs (Addition 2) */}
-        <div className="mt-10 pt-8 border-t border-slate-200" style={{ pageBreakBefore: 'always' }}>
-          <h3 className="text-xl font-bold text-[#1a6b5c] mb-6 text-center">rVCSS Visualization</h3>
-          
+        {/* PAGE 2 */}
+        <div className="pdf-page px-8 py-10 flex flex-col justify-between" style={{ minHeight: '297mm' }}>
+          <div>
+            {/* rVCSS Visual Graphs (Addition 2) */}
+            <div className="mt-4">
+              <h3 className="text-xl font-bold text-[#1a6b5c] mb-6 text-center">rVCSS Visualization</h3>
+
           <div className="grid md:grid-cols-2 gap-8 mb-8">
             {/* Right Leg Radar */}
             <div className="bg-slate-50 p-6 rounded-lg border flex flex-col items-center">
@@ -289,13 +305,15 @@ export function AssessmentReportPage() {
                 </BarChart>
               </ResponsiveContainer>
             </div>
+            </div>
           </div>
         </div>
 
-        <div className="text-center mt-12 pt-8 border-t text-sm text-muted-foreground">
-          <p>Generated by CEVI — Clinical Electronic Venous Intelligence</p>
+        <div className="text-center mt-12 pt-8 border-t text-sm text-muted-foreground w-full">
+          <p>Jawaharlal Nehru Medical College</p>
         </div>
       </div>
     </div>
+  </div>
   );
 }

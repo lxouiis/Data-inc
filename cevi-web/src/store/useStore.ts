@@ -175,7 +175,7 @@ interface CeviState {
   fetchPatients: () => Promise<void>;
   addPatient: (patient: Partial<Patient>) => Promise<string | null>;
   updatePatient: (id: string, patient: Partial<Patient>) => Promise<void>;
-  addAssessment: (assessment: any) => Promise<string | undefined>;
+  addAssessment: (assessment: any) => Promise<any>;
   fetchAssessments: (patientId: string) => Promise<void>;
   
   // Getters
@@ -416,7 +416,6 @@ export const useStore = create<CeviState>()(
 
       addAssessment: async (assessment) => {
         try {
-          // Use the exact structure that standard assessment uses
           const payload = {
             patientId: assessment.patientId,
             comorbidities: assessment.comorbidities,
@@ -430,14 +429,14 @@ export const useStore = create<CeviState>()(
           };
 
           const res = await api.post('/assessments', payload);
-          const assessmentId = res.data.id;
+          const assessmentData = res.data;
 
-          // Refresh assessments after save
           await get().fetchAssessments(assessment.patientId);
 
-          return assessmentId; // Return new ID to navigate to report
+          return assessmentData; 
         } catch (error) {
           console.error('Add assessment failed:', error);
+          throw error;
         }
       },
 
